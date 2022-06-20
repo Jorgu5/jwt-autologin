@@ -80,6 +80,7 @@ class Jwt_Autologin
 		$this->define_public_hooks();
 
 		add_action('rest_api_init', array($this, 'create_custom_endpoint'));
+		add_action('wp_head', array($this, 'decrypt_jwt_token'));
 	}
 
 	/**
@@ -183,30 +184,69 @@ class Jwt_Autologin
 	public function create_custom_endpoint()
 	{
 		register_rest_route('jwt-autologin', '/token', array(
-			'methods' => ['POST', 'GET'],
-			'callback' => array($this, 'get_jwt_auth_token')
+			'methods' => ['POST'],
+			'callback' => array($this, 'custom_endpoint_response')
 		));
+	}
+
+	/**
+	 * Check if user exists
+	 */
+
+	public function user_exists($user_data)
+	{
+	}
+
+	/**
+	 * Autologin feature
+	 * Login automatically if user exists. 
+	 */
+
+	public function login_user($user_data)
+	{
+		// wp_set_auth_cookie
+	}
+
+	/**
+	 * Register user in the backround
+	 */
+
+	public function register_user(object $user_data)
+	{
+
+		// Hash password
+		$pass = hash('md5', $user_data->first_name . $user_data->last_name, false, []);
+
+		// Create Use
+		wp_create_user($user_data->username, $pass, $user_data->email);
+
+		// Additional User Meta in BuddyBoss
+		if (!is_wp_error($user)) {
+			foreach ($meta as $key => $val) {
+				update_user_meta($user, $key, $val);
+			}
+		}
+
+		// return $user;
 	}
 
 	/**
 	 * WP Rest API callback
 	 */
 
-	public function get_jwt_auth_token(WP_REST_REQUEST $request)
+	public function custom_endpoint_response(WP_REST_REQUEST $request)
 	{
-		$response['text'] = $request['text'];
+		$response['encoded_token'] = $request['encoded_token'];
 
 		$res = new WP_REST_Response($response);
 		$res->set_status(200);
 
-		return ['data' => $res];
-	}
+		// Decode JWT
 
-	/**
-	 * Decrypt JWT token
-	 */
+		$res = json_decode(base64_decode(str_replace('_', '/', str_replace('-', '+', explode('.', $response['encoded_token'])[1]))));
 
-	public function decrypt_jwt_token()
-	{
+		$this->register_user($res);
+
+		return ['user_data' => $res];
 	}
 }
