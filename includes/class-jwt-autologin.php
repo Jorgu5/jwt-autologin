@@ -80,7 +80,6 @@ class Jwt_Autologin
 		$this->define_public_hooks();
 
 		add_action('rest_api_init', array($this, 'create_custom_endpoint'));
-		add_action('wp_head', array($this, 'decrypt_jwt_token'));
 	}
 
 	/**
@@ -190,21 +189,14 @@ class Jwt_Autologin
 	}
 
 	/**
-	 * Check if user exists
-	 */
-
-	public function user_exists($user_data)
-	{
-	}
-
-	/**
 	 * Autologin feature
 	 * Login automatically if user exists. 
 	 */
 
-	public function login_user($user_data)
+	public function login_user($user_id)
 	{
-		// wp_set_auth_cookie
+		wp_set_current_user($user_id);
+		wp_set_auth_cookie($user_id, true);
 	}
 
 	/**
@@ -215,19 +207,46 @@ class Jwt_Autologin
 	{
 
 		// Hash password
-		$pass = hash('md5', $user_data->first_name . $user_data->last_name, false, []);
+		$pass = hash('md5', $user_data->first_name . $user_data->entity_uuid, false, []);
+
+		// Wrap Entity UUIDS
+		array_unshift($user_data->member_entity_uuids, $user_data->entity_uuid);
+
+		// Prepare date format
+		$birthdate = date('F j, Y', strtotime($user_data->dob));
+
+		$user_data_array = array(
+			'user_pass' => $pass,
+			'user_login' => $user_data->username,
+			'user_email' => $user_data->email,
+			'display_name' => $user_data->first_name . $user_data->last_name,
+			'first_name' => $user_data->first_name,
+			'last_name' => $user_data->last_name,
+			'role' => 'subscriber',
+		);
 
 		// Create Use
-		wp_create_user($user_data->username, $pass, $user_data->email);
+		$user = wp_insert_user($user_data_array);
 
 		// Additional User Meta in BuddyBoss
 		if (!is_wp_error($user)) {
-			foreach ($meta as $key => $val) {
-				update_user_meta($user, $key, $val);
+
+			// Add Entity UUIDS to custom meta
+			update_user_meta($user, 'entity_uuids', $user_data->member_entity_uuids);
+			// Add Member Usernames to custom meta
+			update_user_meta($user, 'member_usernames', $user_data->member_usernames);
+
+			if (function_exists('xprofile_set_field_data')) {
+				// Set Birthdate date in xProfile BuddyBoss
+				xprofile_set_field_data(4, $user, $birthdate, false);
+				// Sync fields with BuddyBoss
+				bp_xprofile_sync_bp_profile($user);
 			}
+
+			$this->login_user($user);
 		}
 
-		// return $user;
+		return true;
 	}
 
 	/**
@@ -243,10 +262,40 @@ class Jwt_Autologin
 
 		// Decode JWT
 
-		$res = json_decode(base64_decode(str_replace('_', '/', str_replace('-', '+', explode('.', $response['encoded_token'])[1]))));
+		if (!empty($response['encoded_token'])) {
 
-		$this->register_user($res);
+			$user_data = json_decode(base64_decode(str_replace('_', '/', str_replace('-', '+', explode('.', $response['encoded_token'])[1]))));
 
-		return ['user_data' => $res];
+			// Redirect if response is empty or there is no email
+			if (empty($user_data->email)) {
+				$this->redirect_back('https://app.uptogether.org/');
+				$res->set_status(301);
+				return;
+			}
+
+			// Register user
+
+			$user_registered = $this->register_user($user_data);
+
+			// Get ID of user
+
+			$user = get_user_by('email', $user_data->email);
+
+			// Login if exists
+			if ($user_registered) {
+				$this->login_user($user->ID);
+			}
+
+			return $user_data;
+		}
+
+		$this->redirect_back('https://app.uptogether.org/');
+		$res->set_status(301);
+		return;
+	}
+
+	public function redirect_back($url)
+	{
+		header('Location:' . $url);
 	}
 }
