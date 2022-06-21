@@ -80,6 +80,7 @@ class Jwt_Autologin
 		$this->define_public_hooks();
 
 		add_action('rest_api_init', array($this, 'create_custom_endpoint'));
+		add_action('init', array($this, 'redirect_on_load'));
 	}
 
 	/**
@@ -269,7 +270,7 @@ class Jwt_Autologin
 			// Redirect if response is empty or there is no email
 			if (empty($user_data->email)) {
 				$this->redirect_back('https://app.uptogether.org/');
-				$res->set_status(301);
+				$res->set_status(302);
 				return;
 			}
 
@@ -290,12 +291,20 @@ class Jwt_Autologin
 		}
 
 		$this->redirect_back('https://app.uptogether.org/');
-		$res->set_status(301);
+		$res->set_status(302);
 		return;
 	}
 
 	public function redirect_back($url)
 	{
-		header('Location:' . $url);
+		wp_redirect($url);
+		exit;
+	}
+
+	public function redirect_on_load()
+	{
+		if (!is_user_logged_in()) {
+			$this->redirect_back('https://app.uptogether.org/');
+		}
 	}
 }
